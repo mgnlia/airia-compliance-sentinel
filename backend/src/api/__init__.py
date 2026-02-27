@@ -1,1 +1,1 @@
-# api module
+"""Compliance Sentinel API."""
