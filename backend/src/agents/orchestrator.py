@@ -60,6 +60,31 @@ class OrchestratorAgent:
 
         return self._current_risk
 
+    def get_risk_score(self) -> RiskScore:
+        """Get current risk score."""
+        if self._current_risk is None:
+            self._current_risk = self._calculate_risk()
+        return self._current_risk
+
+    def get_dashboard_summary(self) -> dict:
+        """Get full dashboard summary."""
+        risk = self.get_risk_score()
+        return {
+            "risk": risk.model_dump(),
+            "agents": {name: status.model_dump() for name, status in self.agent_statuses.items()},
+            "recent_findings": [f.model_dump() for f in sorted(self.findings, key=lambda x: x.detected_at, reverse=True)[:10]],
+            "pending_reviews": len([r for r in self.reviews if r.status == "pending"]),
+        }
+
+    def update_agent_status(self, agent_name: str, is_active: bool = True, findings_today: int = 0) -> None:
+        """Update the status of a monitoring agent."""
+        if agent_name not in self.agent_statuses:
+            self.agent_statuses[agent_name] = AgentStatus(agent_name=agent_name)
+        status = self.agent_statuses[agent_name]
+        status.is_active = is_active
+        status.last_heartbeat = datetime.utcnow()
+        status.findings_today += findings_today
+
     def _calculate_risk(self) -> RiskScore:
         """Calculate overall and per-framework risk scores."""
         if not self.findings:
@@ -131,49 +156,3 @@ class OrchestratorAgent:
                 logger.info(f"Review {review_id} resolved: {status} by {reviewer}")
                 return review
         return None
-
-    def get_risk_score(self) -> RiskScore:
-        """Get current risk score."""
-        if not self._current_risk:
-            self._current_risk = self._calculate_risk()
-        return self._current_risk
-
-    def get_pending_reviews(self) -> list[HITLReview]:
-        """Get all pending HITL reviews."""
-        return [r for r in self.reviews if r.status == "pending"]
-
-    def get_findings_by_severity(self, severity: Severity) -> list[ComplianceFinding]:
-        """Get findings filtered by severity."""
-        return [f for f in self.findings if f.severity == severity]
-
-    def get_findings_by_framework(self, framework: ComplianceFramework) -> list[ComplianceFinding]:
-        """Get findings filtered by framework."""
-        return [f for f in self.findings if framework in f.frameworks]
-
-    def update_agent_status(self, agent_name: str, is_active: bool, findings_today: int = 0):
-        """Update the status of a monitoring agent."""
-        self.agent_statuses[agent_name] = AgentStatus(
-            agent_name=agent_name,
-            is_active=is_active,
-            last_heartbeat=datetime.utcnow(),
-            findings_today=findings_today,
-        )
-
-    def get_dashboard_summary(self) -> dict:
-        """Get a summary suitable for the dashboard."""
-        risk = self.get_risk_score()
-        return {
-            "risk_score": risk.model_dump(),
-            "pending_reviews": len(self.get_pending_reviews()),
-            "total_findings": len(self.findings),
-            "critical_findings": risk.critical_count,
-            "high_findings": risk.high_count,
-            "agent_statuses": {
-                name: status.model_dump() for name, status in self.agent_statuses.items()
-            },
-            "recent_findings": [
-                f.model_dump() for f in sorted(
-                    self.findings, key=lambda x: x.detected_at, reverse=True
-                )[:10]
-            ],
-        }
